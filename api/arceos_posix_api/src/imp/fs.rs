@@ -1,6 +1,6 @@
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
-use core::ffi::{c_char, c_int};
+use core::ffi::{c_char, c_int, c_void};
 
 use axerrno::{LinuxError, LinuxResult};
 use axfs::fops::OpenOptions;
@@ -224,6 +224,31 @@ pub fn sys_lseek(fd: c_int, offset: ctypes::off_t, whence: c_int) -> ctypes::off
         };
         let off = File::from_fd(fd)?.inner.lock().seek(pos)?;
         Ok(off)
+    })
+}
+
+pub fn sys_pread64(
+    fd: c_int,
+    buf: *mut c_void,
+    count: usize,
+    offset: ctypes::off_t,
+) -> ctypes::ssize_t {
+    debug!(
+        "sys_pread64 <= {} {:#x} {} {}",
+        fd, buf as usize, count, offset
+    );
+    syscall_body!(sys_pread64, {
+        if buf.is_null() {
+            return Err(LinuxError::EFAULT);
+        }
+        let dst = unsafe { core::slice::from_raw_parts_mut(buf as *mut u8, count) };
+        let pos = SeekFrom::Start(offset as _);
+        let file = File::from_fd(fd)?;
+        let old_offset = file.inner.lock().seek(SeekFrom::Current(0))?;
+        let _ = file.inner.lock().seek(pos)?;
+        let ret = file.read(dst)? as ctypes::ssize_t;
+        file.inner.lock().seek(SeekFrom::Start(old_offset))?;
+        Ok(ret)
     })
 }
 
